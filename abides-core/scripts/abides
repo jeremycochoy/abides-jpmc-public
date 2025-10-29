@@ -10,6 +10,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import coloredlogs
 import numpy as np
+import pandas as pd
 from termcolor import colored
 
 from abides_core.kernel import Kernel
@@ -58,6 +59,28 @@ def parse_args(args: List[str]) -> Optional[Dict[str, Union[str, bool]]]:
     return parsed_values
 
 
+def export_l1_snapshots(end_state: Dict[str, any], output_path: str) -> None:
+    """Export L1 order book snapshots to parquet file."""
+    logger.info(f"Exporting L1 snapshots to {output_path}")
+
+    exchange_agent = end_state["agents"][0]
+    symbol = list(exchange_agent.order_books.keys())[0]
+    order_book = exchange_agent.order_books[symbol]
+
+    L1 = order_book.get_L1_snapshots()
+
+    df = pd.DataFrame({
+        'time': pd.to_datetime(L1['best_bids'][:, 0], unit='ns'),
+        'bid_price': L1['best_bids'][:, 1],
+        'bid_volume': L1['best_bids'][:, 2],
+        'ask_price': L1['best_asks'][:, 1],
+        'ask_volume': L1['best_asks'][:, 2],
+    })
+
+    df.to_parquet(output_path, index=False)
+    logger.info(f"L1 snapshots exported successfully")
+
+
 def main():
     print()
     print("╔═══════════════════════════════════════════════════════════╗")
@@ -78,6 +101,9 @@ def main():
 
     if config_builder is None:
         return
+
+    # Extract CLI-only arguments (not passed to config_builder)
+    l1_output = cli_args.pop("l1_output", None)
 
     config_args = inspect.getfullargspec(config_builder).args
 
@@ -117,11 +143,14 @@ def main():
     sim_start_time = dt.datetime.now()
     logger.info(f"Simulation Start Time: {sim_start_time}")
 
-    kernel.run()
+    end_state = kernel.run()
 
     sim_end_time = dt.datetime.now()
     logger.info(f"Simulation End Time: {sim_end_time}")
     logger.info(f"Time taken to run simulation: {sim_end_time - sim_start_time}")
+
+    if l1_output:
+        export_l1_snapshots(end_state, l1_output)
 
 
 if __name__ == "__main__":
