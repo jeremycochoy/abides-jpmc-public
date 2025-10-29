@@ -1,9 +1,4 @@
-# RMSC-3 (Reference Market Simulation Configuration):
-# - 1     Exchange Agent
-# - 2     Adaptive Market Maker Agents
-# - 100   Value Agents
-# - 25    Momentum Agents
-# - 5000  Noise Agents
+# Market Simulation Configuration)
 
 import numpy as np
 
@@ -33,16 +28,18 @@ INITIAL_PRICE = REAL_STOCK_PRICE * TICK_SIZE // LOT_SIZE
 INITIAL_VOLUME = LOT_SIZE  # 1 real stock total (0.5 per side)
 
 # Zero Intelligence agent parameters
-ZI_PRICE_STD = 100 * TICK_SIZE // LOT_SIZE  # $100 std in real stock price
-ZI_ORDER_SIZE_MIN = 1000  # 0.01 real stocks
-ZI_ORDER_SIZE_MAX = 5000  # 0.05 real stocks
+NUM_NOISE_AGENTS = 25  # Number of Zero Intelligence (noise) agents
+ZI_PRICE_STD = 0.02  # 2% standard deviation relative to mid price
+ZI_ORDER_SIZE_MIN = int(0.1 * LOT_SIZE)  # 0.1 real stocks
+ZI_ORDER_SIZE_MAX = int(0.5 * LOT_SIZE)  # 0.5 real stocks
+ZI_WAKE_UP_INTERVAL = str_to_ns("15s")  # Wake up every 15 seconds
 
 def populate_initial_order_book(order_book: OrderBook, mkt_open: int) -> None:
     """Populate order book with initial orders."""
     vol = INITIAL_VOLUME // 2
     initial_orders = [
-        LimitOrder(0, mkt_open, order_book.symbol, vol, Side.BID, INITIAL_PRICE - 100),
-        LimitOrder(0, mkt_open, order_book.symbol, vol, Side.ASK, INITIAL_PRICE + 100),
+        LimitOrder(0, mkt_open, order_book.symbol, vol, Side.BID, INITIAL_PRICE - 1),
+        LimitOrder(0, mkt_open, order_book.symbol, vol, Side.ASK, INITIAL_PRICE + 1),
     ]
     for order in initial_orders:
         order_book.enter_order(order, quiet=True)
@@ -55,8 +52,8 @@ def populate_initial_order_book(order_book: OrderBook, mkt_open: int) -> None:
 def build_config(
     ticker="ABM",
     historical_date="20200603",
-    start_time="09:30:00",
-    end_time="11:30:00",
+    start_time="00:00:00",
+    end_time=None,
     exchange_log_orders=True,
     log_orders=True,
     book_logging=True,
@@ -66,7 +63,7 @@ def build_config(
     stdout_log_level="INFO",
     ##
     num_momentum_agents=0,
-    num_noise_agents=5000,
+    num_noise_agents=NUM_NOISE_AGENTS,
     num_value_agents=0,
     ## exec agent
     execution_agents=False,
@@ -77,7 +74,7 @@ def build_config(
     mm_window_size="adaptive",
     mm_min_order_size=1,
     mm_num_ticks=10,
-    mm_wake_up_freq=str_to_ns("10S"),
+    mm_wake_up_freq=str_to_ns("10s"),
     mm_skew_beta=0,
     mm_level_spacing=5,
     mm_spread_alpha=0.75,
@@ -109,7 +106,13 @@ def build_config(
     # Historical date to simulate.
     historical_date = datetime_str_to_ns(historical_date)
     mkt_open = historical_date + str_to_ns(start_time)
-    mkt_close = historical_date + str_to_ns(end_time)
+    # Determine simulation end time
+    if end_time is None:
+        simulation_end = mkt_open + str_to_ns("3d")  # Run for 3 days by default
+    else:
+        simulation_end = historical_date + str_to_ns(end_time)
+    # Market closes after simulation ends
+    mkt_close = simulation_end - str_to_ns("60s")
     agent_count, agents, agent_types = 0, [], []
 
     # Hyperparameters
@@ -158,15 +161,14 @@ def build_config(
 
     # 2) Zero Intelligence Agents
     num_zi = num_noise_agents
-    zi_mkt_open = historical_date + str_to_ns("09:00:00")
-    zi_mkt_close = historical_date + str_to_ns("16:00:00")
     agents.extend(
         [
             ZeroIntelligenceAgent(
                 id=j,
                 symbol=symbol,
                 starting_cash=starting_cash,
-                wakeup_time=get_wake_time(zi_mkt_open, zi_mkt_close),
+                wakeup_time=mkt_open + np.random.randint(0, ZI_WAKE_UP_INTERVAL + 1),
+                wake_up_interval=ZI_WAKE_UP_INTERVAL,
                 log_orders=log_orders,
                 price_std=ZI_PRICE_STD,
                 order_size_min=ZI_ORDER_SIZE_MIN,
@@ -281,7 +283,7 @@ def build_config(
 
     ##kernel args
     kernelStartTime = historical_date
-    kernelStopTime = mkt_close + str_to_ns("00:01:00")
+    kernelStopTime = simulation_end
 
     return {
         "start_time": kernelStartTime,

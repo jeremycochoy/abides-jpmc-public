@@ -4,6 +4,7 @@ from typing import Optional
 import numpy as np
 
 from abides_core import Message, NanosecondTime
+from abides_core.utils import str_to_ns
 
 from ..generators import OrderSizeGenerator
 from ..messages.query import QuerySpreadResponseMsg
@@ -16,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 class ZeroIntelligence(TradingAgent):
     """
-    Noise agent implement simple strategy. The agent wakes up once and places 1 order.
+    Zero Intelligence agent implements a simple trading strategy.
+    The agent wakes up periodically at regular intervals and places 1 order each time.
     """
 
     def __init__(
@@ -30,15 +32,18 @@ class ZeroIntelligence(TradingAgent):
         log_orders: bool = False,
         order_size_model: Optional[OrderSizeGenerator] = None,
         wakeup_time: Optional[NanosecondTime] = None,
+        wake_up_interval: NanosecondTime = str_to_ns("15s"),
         price_std: float = 50.0,
         order_size_min: int = 20,
         order_size_max: int = 50,
+        price_model: str = "lognormal",
     ) -> None:
 
         # Base class init.
         super().__init__(id, name, type, random_state, starting_cash, log_orders)
 
         self.wakeup_time: NanosecondTime = wakeup_time
+        self.wake_up_interval: NanosecondTime = wake_up_interval
 
         self.symbol: str = symbol  # symbol to trade
 
@@ -60,6 +65,11 @@ class ZeroIntelligence(TradingAgent):
 
         self.order_size_model = order_size_model  # Probabilistic model for order size
         self.price_std: float = price_std
+        self.price_model: str = price_model  # "lognormal" or "normal"
+
+        # Remember last known bid and ask for price calculations
+        self.last_bid: Optional[int] = None
+        self.last_ask: Optional[int] = None
         self.order_size_min: int = order_size_min
         self.order_size_max: int = order_size_max
 
@@ -150,18 +160,53 @@ class ZeroIntelligence(TradingAgent):
         else:
             self.state = "ACTIVE"
 
-    def placeOrder(self) -> None:
+    def compute_price_lognormal(self, mid_price: float) -> int:
+        log_std = np.log1p(self.price_std)  # stable for small std
+        log_return = -0.5 * log_std**2 + self.random_state.normal(0, log_std)
+        price = max(1, int(np.rint(mid_price * np.exp(log_return))))
+        return price
+
+    def compute_price_normal(self, mid_price: float) -> int:
+        price_noise = self.random_state.normal(0, mid_price * self.price_std)
+        price = max(1, int(np.rint(mid_price + price_noise)))
+        return price
+
+    def place_orders(self) -> None:
         buy_indicator = self.random_state.randint(0, 1 + 1)
 
         bid, bid_vol, ask, ask_vol = self.get_known_bid_ask(self.symbol)
 
+        # Update last known bid/ask if available
+        if bid:
+            self.last_bid = bid
+        if ask:
+            self.last_ask = ask
+
+        # Check if we have at least one price to work with
+        if self.last_bid is None and self.last_ask is None:
+            logger.warning(f"Agent {self.id}: No bid or ask available yet, cannot place order")
+            return
+
+        # Compute mid price from last known values
+        if self.last_bid and self.last_ask:
+            mid_price = (self.last_bid + self.last_ask) / 2
+        elif self.last_bid:
+            logger.warning(f"Agent {self.id}: No ask available, using last_bid={self.last_bid}")
+            mid_price = self.last_bid
+        else:  # only last_ask
+            logger.warning(f"Agent {self.id}: No bid available, using last_ask={self.last_ask}")
+            mid_price = self.last_ask
+
         if self.order_size_model is not None:
             self.order_size = self.order_size_model.sample(random_state=self.random_state)
 
-        if self.order_size > 0 and bid and ask:
-            mid_price = (bid + ask) / 2
-            price_noise = self.random_state.normal(0, self.price_std)
-            price = int(mid_price + price_noise)
+        if self.order_size > 0:
+            if self.price_model == "lognormal":
+                price = self.compute_price_lognormal(mid_price)
+            elif self.price_model == "normal":
+                price = self.compute_price_normal(mid_price)
+            else:
+                raise ValueError(f"Unknown price_model: {self.price_model}")
 
             if buy_indicator == 1:
                 self.place_limit_order(self.symbol, self.order_size, Side.BID, price)
@@ -192,10 +237,15 @@ class ZeroIntelligence(TradingAgent):
 
                 # We now have the information needed to place a limit order with the eta
                 # strategic threshold parameter.
-                self.placeOrder()
+                # Cancel all outstanding orders before placing new one
+                self.cancel_all_orders()
+                self.place_orders()
+
+                # Schedule next wakeup
+                self.set_wakeup(current_time + self.get_wake_frequency())
                 self.state = "AWAITING_WAKEUP"
 
     # Internal state and logic specific to this agent subclass.
 
     def get_wake_frequency(self) -> NanosecondTime:
-        return self.random_state.randint(low=0, high=100)
+        return self.wake_up_interval

@@ -42,7 +42,7 @@ def load_build_config_function(config_file: str) -> Tuple[str, Callable]:
     return (module_name, module.build_config)
 
 
-def parse_args(args: List[str]) -> Optional[Dict[str, Union[str, bool]]]:
+def parse_args(args: List[str]) -> Optional[Dict[str, Union[str, bool, int]]]:
     parsed_values = {}
     key = None
     for arg in args:
@@ -50,7 +50,11 @@ def parse_args(args: List[str]) -> Optional[Dict[str, Union[str, bool]]]:
             key = arg[2:]
             parsed_values[key] = True
         elif key is not None:
-            parsed_values[key] = arg
+            # Try to convert to int if it looks like an integer
+            try:
+                parsed_values[key] = int(arg)
+            except ValueError:
+                parsed_values[key] = arg
             key = None
         else:
             print(colored(f"Error parsing argument: '{arg}'\n", "red"))
