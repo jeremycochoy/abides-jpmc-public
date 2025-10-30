@@ -29,7 +29,7 @@ INITIAL_VOLUME = LOT_SIZE  # 1 real stock total (0.5 per side)
 
 # Zero Intelligence agent parameters
 NUM_NOISE_AGENTS = 25  # Number of Zero Intelligence (noise) agents
-ZI_PRICE_STD = 0.02  # 2% standard deviation relative to mid price
+ZI_PRICE_STD = 0.005  # 0.5% standard deviation relative to mid price
 ZI_ORDER_SIZE_MIN = int(0.1 * LOT_SIZE)  # 0.1 real stocks
 ZI_ORDER_SIZE_MAX = int(0.5 * LOT_SIZE)  # 0.5 real stocks
 ZI_WAKE_UP_INTERVAL = str_to_ns("15s")  # Wake up every 15 seconds
@@ -51,15 +51,14 @@ def populate_initial_order_book(order_book: OrderBook, mkt_open: int) -> None:
 
 def build_config(
     ticker="ABM",
-    historical_date="20200603",
+    historical_date="20250101",
     start_time="00:00:00",
     end_time=None,
     exchange_log_orders=True,
     log_orders=True,
     book_logging=True,
     book_log_depth=10,
-    #   seed=int(NanosecondTime.now().timestamp() * 1000000) % (2 ** 32 - 1),
-    seed=1,
+    seed=int(NanosecondTime.now().timestamp() * 1000000) % (2 ** 32 - 1),
     stdout_log_level="INFO",
     ##
     num_momentum_agents=0,

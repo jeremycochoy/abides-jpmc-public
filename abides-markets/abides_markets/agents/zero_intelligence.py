@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 class ZeroIntelligence(TradingAgent):
     """
     Zero Intelligence agent implements a simple trading strategy.
-    The agent wakes up periodically at regular intervals and places 1 order each time.
+    The agent wakes up periodically at regular intervals, cancel their
+    previous orders and and place a new order following a random distribution
+    around the last mid price.
     """
 
     def __init__(
@@ -55,34 +57,21 @@ class ZeroIntelligence(TradingAgent):
         # any special event or condition.
         self.state: str = "AWAITING_WAKEUP"
 
-        # The agent must track its previous wake time, so it knows how many time
-        # units have passed.
-        self.prev_wake_time: Optional[NanosecondTime] = None
-
         self.order_size: Optional[int] = (
             self.random_state.randint(order_size_min, order_size_max + 1) if order_size_model is None else None
         )
 
         self.order_size_model = order_size_model  # Probabilistic model for order size
+        self.order_size_min: int = order_size_min # If no model is provided, uniform between min/max
+        self.order_size_max: int = order_size_max
         self.price_std: float = price_std
         self.price_model: str = price_model  # "lognormal" or "normal"
 
         # Remember last known bid and ask for price calculations
         self.last_bid: Optional[int] = None
         self.last_ask: Optional[int] = None
-        self.order_size_min: int = order_size_min
-        self.order_size_max: int = order_size_max
-
-    def kernel_starting(self, start_time: NanosecondTime) -> None:
-        # self.kernel is set in Agent.kernel_initializing()
-        # self.exchange_id is set in TradingAgent.kernel_starting()
-
-        super().kernel_starting(start_time)
-
-        self.oracle = self.kernel.oracle
 
     def kernel_stopping(self) -> None:
-        # Always call parent method to be safe.
         super().kernel_stopping()
 
         # Fix the problem of logging an agent that has not waken up
@@ -125,17 +114,15 @@ class ZeroIntelligence(TradingAgent):
         # Parent class handles discovery of exchange times and market_open wakeup call.
         super().wakeup(current_time)
 
-        self.state = "INACTIVE"
-
         if not self.mkt_open or not self.mkt_close:
             # TradingAgent handles discovery of exchange times.
             return
-        else:
-            if not self.trading:
-                self.trading = True
 
-                # Time to start trading!
-                logger.debug("{} is ready to start trading now.", self.name)
+        if not self.trading:
+            self.trading = True
+
+            # Time to start trading!
+            logger.debug("{} is ready to start trading now.", self.name)
 
         # Steady state wakeup behavior starts here.
 
@@ -154,11 +141,8 @@ class ZeroIntelligence(TradingAgent):
             self.state = "AWAITING_SPREAD"
             return
 
-        if type(self) == ZeroIntelligence:
-            self.get_current_spread(self.symbol)
-            self.state = "AWAITING_SPREAD"
-        else:
-            self.state = "ACTIVE"
+        self.get_current_spread(self.symbol)
+        self.state = "AWAITING_SPREAD"
 
     def compute_price_lognormal(self, mid_price: float) -> int:
         log_std = np.log1p(self.price_std)  # stable for small std
@@ -208,10 +192,8 @@ class ZeroIntelligence(TradingAgent):
             else:
                 raise ValueError(f"Unknown price_model: {self.price_model}")
 
-            if buy_indicator == 1:
-                self.place_limit_order(self.symbol, self.order_size, Side.BID, price)
-            else:
-                self.place_limit_order(self.symbol, self.order_size, Side.ASK, price)
+            side = Side.BID if buy_indicator == 1 else Side.ASK
+            self.place_limit_order(self.symbol, self.order_size, side, price)
 
     def receive_message(
         self, current_time: NanosecondTime, sender_id: int, message: Message
@@ -235,8 +217,7 @@ class ZeroIntelligence(TradingAgent):
                 if self.mkt_closed:
                     return
 
-                # We now have the information needed to place a limit order with the eta
-                # strategic threshold parameter.
+                # We now have the information needed to place a limit order
                 # Cancel all outstanding orders before placing new one
                 self.cancel_all_orders()
                 self.place_orders()
@@ -244,8 +225,6 @@ class ZeroIntelligence(TradingAgent):
                 # Schedule next wakeup
                 self.set_wakeup(current_time + self.get_wake_frequency())
                 self.state = "AWAITING_WAKEUP"
-
-    # Internal state and logic specific to this agent subclass.
 
     def get_wake_frequency(self) -> NanosecondTime:
         return self.wake_up_interval
