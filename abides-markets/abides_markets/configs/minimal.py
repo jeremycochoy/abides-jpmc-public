@@ -1,18 +1,18 @@
 # Market Simulation Configuration)
 
+import time
 import numpy as np
 
+from abides_core import NanosecondTime
 from abides_core.utils import str_to_ns, datetime_str_to_ns, get_wake_time
 from abides_markets.agents import (
     ExchangeAgent,
-    ValueAgent,
     AdaptiveMarketMakerAgent,
     MomentumAgent,
 #    POVExecutionAgent,
 )
 from abides_markets.agents.zero_intelligence import ZeroIntelligence as ZeroIntelligenceAgent
 POVExecutionAgent = None
-from abides_markets.oracles import SparseMeanRevertingOracle
 from abides_markets.orders import Side, LimitOrder
 from abides_markets.utils import generate_latency_model
 from abides_markets.order_book import OrderBook
@@ -58,12 +58,11 @@ def build_config(
     log_orders=True,
     book_logging=True,
     book_log_depth=10,
-    seed=int(NanosecondTime.now().timestamp() * 1000000) % (2 ** 32 - 1),
+    seed=int(time.time_ns()) % (2 ** 32 - 1),
     stdout_log_level="INFO",
     ##
     num_momentum_agents=0,
     num_noise_agents=NUM_NOISE_AGENTS,
-    num_value_agents=0,
     ## exec agent
     execution_agents=False,
     execution_pov=0.1,
@@ -78,22 +77,7 @@ def build_config(
     mm_level_spacing=5,
     mm_spread_alpha=0.75,
     mm_backstop_quantity=50_000,
-    ##fundamental/oracle
-    fund_r_bar=100_000,
-    fund_kappa=1.67e-16,
-    fund_sigma_s=0,
-    fund_vol=1e-3,  # Volatility of fundamental time series (std).
-    fund_megashock_lambda_a=2.77778e-18,
-    fund_megashock_mean=1000,
-    fund_megashock_var=50_000,
-    ##value agent
-    val_r_bar=100_000,
-    val_kappa=1.67e-15,
-    val_vol=1e-8,
-    val_lambda_a=7e-11,
 ):
-    fund_sigma_n = fund_r_bar / 10
-    val_sigma_n = val_r_bar / 10
     symbol = ticker
 
     ##setting numpy seed
@@ -116,24 +100,6 @@ def build_config(
 
     # Hyperparameters
     starting_cash = 10000000  # Cash in this simulator is always in CENTS.
-
-    # Oracle
-    symbols = {
-        symbol: {
-            "r_bar": fund_r_bar,
-            "kappa": fund_kappa,
-            "sigma_s": fund_sigma_s,
-            "fund_vol": fund_vol,
-            "megashock_lambda_a": fund_megashock_lambda_a,
-            "megashock_mean": fund_megashock_mean,
-            "megashock_var": fund_megashock_var,
-            "random_state": np.random.RandomState(
-                seed=np.random.randint(low=0, high=2**32, dtype="uint64")
-            ),
-        }
-    }
-
-    oracle = SparseMeanRevertingOracle(mkt_open, mkt_close, symbols)
 
     # 1) Exchange Agent
 
@@ -179,28 +145,7 @@ def build_config(
     agent_count += num_zi
     agent_types.extend(["ZeroIntelligenceAgent"])
 
-    # 3) Value Agents
-    num_value = num_value_agents
-    agents.extend(
-        [
-            ValueAgent(
-                id=j,
-                name="Value Agent {}".format(j),
-                symbol=symbol,
-                starting_cash=starting_cash,
-                sigma_n=val_sigma_n,
-                r_bar=val_r_bar,
-                kappa=val_kappa,
-                lambda_a=val_lambda_a,
-                log_orders=log_orders,
-            )
-            for j in range(agent_count, agent_count + num_value)
-        ]
-    )
-    agent_count += num_value
-    agent_types.extend(["ValueAgent"])
-
-    # 4) Market Maker Agents
+    # 3) Market Maker Agents
 
     """
     window_size ==  Spread of market maker (in ticks) around the mid price
@@ -245,7 +190,7 @@ def build_config(
     agent_count += num_mm_agents
     agent_types.extend("POVMarketMakerAgent")
 
-    # 5) Momentum Agents
+    # 4) Momentum Agents
     num_momentum_agents = num_momentum_agents
 
     agents.extend(
@@ -290,7 +235,7 @@ def build_config(
         "agents": agents,
         "agent_latency_model": latency_model,
         "default_computation_delay": default_computation_delay,
-        "custom_properties": {"oracle": oracle},
+        "custom_properties": {"oracle": None},
         "random_state_kernel": random_state_kernel,
         "stdout_log_level": stdout_log_level,
     }
