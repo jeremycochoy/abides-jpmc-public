@@ -31,8 +31,11 @@ class UniformOrderSizeGenerator(OrderSizeGenerator):
         self.order_size_max: int = order_size_max + 1
         self.random_generator: np.random.RandomState = random_generator
 
-    def next(self) -> int:
+    def sample(self, random_state: np.random.RandomState) -> int:
         return self.random_generator.randint(self.order_size_min, self.order_size_max)
+
+    def next(self) -> int:
+        return self.sample(random_state=self.random_generator)
 
     def mean(self) -> float:
         return (self.order_size_max - self.order_size_min - 1) / 2
@@ -64,9 +67,12 @@ class UniformDepthGenerator(OrderDepthGenerator):
         self.random_generator: np.random.RandomState = random_generator
         self.order_depth_min: int = order_depth_min
         self.order_depth_max: int = order_depth_max + 1
+    
+    def sample(self, random_state: np.random.RandomState) -> int:
+        return self.random_generator.randint(self.order_depth_min, self.order_depth_max)
 
     def next(self) -> int:
-        return self.random_generator.randint(self.order_depth_min, self.order_depth_max)
+        return self.sample(random_state=self.random_generator)
 
     def mean(self) -> float:
         return (self.order_depth_max - self.order_depth_min - 1) / 2

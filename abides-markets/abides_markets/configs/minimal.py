@@ -3,7 +3,8 @@
 import time
 import numpy as np
 
-from abides_core.utils import str_to_ns, datetime_str_to_ns, get_wake_time
+from abides_core.utils import str_to_ns, datetime_str_to_ns
+from abides_markets.generators import UniformOrderSizeGenerator
 from abides_markets.agents import (
     ExchangeAgent,
     AdaptiveMarketMakerAgent,
@@ -62,9 +63,6 @@ def build_config(
     ##
     num_momentum_agents=0,
     num_noise_agents=NUM_NOISE_AGENTS,
-    ## exec agent
-    execution_agents=False,
-    execution_pov=0.1,
     ## market maker
     num_market_makers=0,
     mm_pov=0.025,
@@ -129,13 +127,11 @@ def build_config(
             ZeroIntelligenceAgent(
                 id=j,
                 symbol=symbol,
-                starting_cash=starting_cash,
                 wakeup_time=mkt_open + np.random.randint(0, ZI_WAKE_UP_INTERVAL + 1),
                 wake_up_interval=ZI_WAKE_UP_INTERVAL,
                 log_orders=log_orders,
                 price_std=ZI_PRICE_STD,
-                order_size_min=ZI_ORDER_SIZE_MIN,
-                order_size_max=ZI_ORDER_SIZE_MAX,
+                order_size_model=UniformOrderSizeGenerator(ZI_ORDER_SIZE_MIN, ZI_ORDER_SIZE_MAX, np.random.RandomState(seed)),
             )
             for j in range(agent_count, agent_count + num_zi)
         ]

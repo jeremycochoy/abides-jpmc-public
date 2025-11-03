@@ -14,13 +14,12 @@ from .trading_agent import TradingAgent
 
 logger = logging.getLogger(__name__)
 
-
 class ZeroIntelligence(TradingAgent):
     """
     Zero Intelligence agent implements a simple trading strategy.
-    The agent wakes up periodically at regular intervals, cancel their
-    previous orders and and place a new order following a random distribution
-    around the last mid price.
+    The agent wakes up periodically at regular intervals, cancels previous
+    orders and places a new order following a random distribution around
+    the last mid price.
     """
 
     def __init__(
@@ -29,41 +28,33 @@ class ZeroIntelligence(TradingAgent):
         name: Optional[str] = None,
         type: Optional[str] = None,
         random_state: Optional[np.random.RandomState] = None,
-        symbol: str = "IBM",
-        starting_cash: int = 100000,
+        symbol: str = "IBM", # symbol to trade
         log_orders: bool = False,
         order_size_model: Optional[OrderSizeGenerator] = None,
+        # price_distribution_model: Optional[PriceDistributionGenerator] = None,
         wakeup_time: Optional[NanosecondTime] = None,
         wake_up_interval: NanosecondTime = str_to_ns("15s"),
         price_std: float = 50.0,
-        order_size_min: int = 20,
-        order_size_max: int = 50,
         price_model: str = "lognormal",
     ) -> None:
 
         # Base class init.
-        super().__init__(id, name, type, random_state, starting_cash, log_orders)
+        super().__init__(id, name, type, random_state, 0, log_orders)
 
         self.wakeup_time: NanosecondTime = wakeup_time
         self.wake_up_interval: NanosecondTime = wake_up_interval
+        self.symbol: str = symbol
 
-        self.symbol: str = symbol  # symbol to trade
-
-        # The agent uses this to track whether it has begun its strategy or is still
-        # handling pre-market tasks.
         self.trading: bool = False
-
-        # The agent begins in its "complete" state, not waiting for
-        # any special event or condition.
         self.state: str = "AWAITING_WAKEUP"
 
-        self.order_size: Optional[int] = (
-            self.random_state.randint(order_size_min, order_size_max + 1) if order_size_model is None else None
-        )
+        # Order size model
+        if order_size_model is None:
+            # If no model is provided, use a uniform distribution between 10 and 20
+            self.order_size_model = UniformOrderSizeGenerator(10, 20, self.random_state)
+        else:
+            self.order_size_model = order_size_model
 
-        self.order_size_model = order_size_model  # Probabilistic model for order size
-        self.order_size_min: int = order_size_min # If no model is provided, uniform between min/max
-        self.order_size_max: int = order_size_max
         self.price_std: float = price_std
         self.price_model: str = price_model  # "lognormal" or "normal"
 
@@ -79,35 +70,28 @@ class ZeroIntelligence(TradingAgent):
             # noise trader surplus is marked to EOD
             bid, bid_vol, ask, ask_vol = self.get_known_bid_ask(self.symbol)
         except KeyError:
-            self.logEvent("FINAL_VALUATION", self.starting_cash, True)
+            self.logEvent("FINAL_VALUATION", 0, True)
         else:
             # Print end of day valuation.
-            H = int(round(self.get_holdings(self.symbol), -2) / 100)
+            shares_inventory = int(round(self.get_holdings(self.symbol), -2) / 100)
 
             if bid and ask:
-                rT = int(bid + ask) / 2
+                mid_price = int(bid + ask) / 2
             else:
-                rT = self.last_trade[self.symbol]
+                mid_price = self.last_trade[self.symbol]
 
             # final (real) fundamental value times shares held.
-            surplus = rT * H
+            equity = mid_price * shares_inventory + self.holdings["CASH"]
 
-            logger.debug("Surplus after holdings: {}", surplus)
-
-            # Add ending cash value and subtract starting cash value.
-            surplus += self.holdings["CASH"] - self.starting_cash
-            surplus = float(surplus) / self.starting_cash
-
-            self.logEvent("FINAL_VALUATION", surplus, True)
+            self.logEvent("FINAL_VALUATION", equity, True)
 
             logger.debug(
-                "{} final report.  Holdings: {}, end cash: {}, start cash: {}, final fundamental: {}, surplus: {}",
+                "{} final report.  Holdings: {}, end cash: {}, final fundamental: {}, equity: {}",
                 self.name,
-                H,
+                shares_inventory,
                 self.holdings["CASH"],
-                self.starting_cash,
-                rT,
-                surplus,
+                mid_price,
+                equity,
             )
 
     def wakeup(self, current_time: NanosecondTime) -> None:
@@ -120,27 +104,28 @@ class ZeroIntelligence(TradingAgent):
 
         if not self.trading:
             self.trading = True
-
-            # Time to start trading!
             logger.debug("{} is ready to start trading now.", self.name)
 
         # Steady state wakeup behavior starts here.
 
         # If we've been told the market has closed for the day, we will only request
         # final price information, then stop.
-        if self.mkt_closed and (self.symbol in self.daily_close_price):
-            # Market is closed and we already got the daily close price.
-            return
+        if self.mkt_closed:
+            if self.symbol in self.daily_close_price:
+                # Market is closed and we already got the daily close price.
+                return
+            else:
+                # Market is closed and we have not got the daily close price.
+                self.get_current_spread(self.symbol)
+                self.state = "AWAITING_SPREAD"
+                return
 
+        # If the agent was awakened before its wakeup time, wait until the wakeup time
         if self.wakeup_time > current_time:
             self.set_wakeup(self.wakeup_time)
             return
 
-        if self.mkt_closed and self.symbol not in self.daily_close_price:
-            self.get_current_spread(self.symbol)
-            self.state = "AWAITING_SPREAD"
-            return
-
+        # Request the current spread to place orders
         self.get_current_spread(self.symbol)
         self.state = "AWAITING_SPREAD"
 
@@ -156,7 +141,8 @@ class ZeroIntelligence(TradingAgent):
         return price
 
     def place_orders(self) -> None:
-        buy_indicator = self.random_state.randint(0, 1 + 1)
+        """Place a new order at a random price around the mid price."""
+        is_buy = bool(self.random_state.randint(0, 2))
 
         bid, bid_vol, ask, ask_vol = self.get_known_bid_ask(self.symbol)
 
@@ -192,8 +178,8 @@ class ZeroIntelligence(TradingAgent):
             else:
                 raise ValueError(f"Unknown price_model: {self.price_model}")
 
-            side = Side.BID if buy_indicator == 1 else Side.ASK
-            self.place_limit_order(self.symbol, self.order_size, side, price)
+        side = Side.BID if is_buy else Side.ASK
+        self.place_limit_order(self.symbol, self.order_size, side, price)
 
     def receive_message(
         self, current_time: NanosecondTime, sender_id: int, message: Message

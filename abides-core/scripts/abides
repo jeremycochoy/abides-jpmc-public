@@ -1,6 +1,4 @@
 #! /bin/python3
-
-from abides-core.abides_core.abides import extract_l1_snapshots
 import datetime as dt
 import importlib
 import inspect
@@ -14,6 +12,7 @@ import numpy as np
 import pandas as pd
 from termcolor import colored
 
+from abides_core.abides_core.abides import extract_l1_snapshots
 from abides_core.kernel import Kernel
 from abides_core.utils import subdict
 
