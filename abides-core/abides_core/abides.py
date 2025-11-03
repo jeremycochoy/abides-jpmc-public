@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 import coloredlogs
 import numpy as np
+import pandas as pd
 
 from .kernel import Kernel
 from .utils import subdict
@@ -63,3 +64,23 @@ def run(
     logger.info(f"Time taken to run simulation: {sim_end_time - sim_start_time}")
 
     return end_state
+
+def extract_l1_snapshots(end_state: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Extracts L1 snapshots from the end state.
+    """
+    exchange_agent = end_state["agents"][0]
+    symbol = list(exchange_agent.order_books.keys())[0]
+    order_book = exchange_agent.order_books[symbol]
+
+    L1 = order_book.get_L1_snapshots()
+
+    df = pd.DataFrame({
+        'time': pd.to_datetime(L1['best_bids'][:, 0], unit='ns'),
+        'bid_price': L1['best_bids'][:, 1].astype(float),
+        'bid_volume': L1['best_bids'][:, 2].astype(float),
+        'ask_price': L1['best_asks'][:, 1].astype(float),
+        'ask_volume': L1['best_asks'][:, 2].astype(float),
+    }).set_index('time')
+
+    return df

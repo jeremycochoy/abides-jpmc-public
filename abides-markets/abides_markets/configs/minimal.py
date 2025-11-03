@@ -3,7 +3,6 @@
 import time
 import numpy as np
 
-from abides_core import NanosecondTime
 from abides_core.utils import str_to_ns, datetime_str_to_ns, get_wake_time
 from abides_markets.agents import (
     ExchangeAgent,
@@ -96,7 +95,7 @@ def build_config(
         simulation_end = historical_date + str_to_ns(end_time)
     # Market closes after simulation ends
     mkt_close = simulation_end - str_to_ns("60s")
-    agent_count, agents, agent_types = 0, [], []
+    agent_count, agents = 0, []
 
     # Hyperparameters
     starting_cash = 10000000  # Cash in this simulator is always in CENTS.
@@ -121,7 +120,6 @@ def build_config(
             )
         ]
     )
-    agent_types.extend("ExchangeAgent")
     agent_count += 1
 
     # 2) Zero Intelligence Agents
@@ -143,7 +141,6 @@ def build_config(
         ]
     )
     agent_count += num_zi
-    agent_types.extend(["ZeroIntelligenceAgent"])
 
     # 3) Market Maker Agents
 
@@ -188,7 +185,6 @@ def build_config(
         ]
     )
     agent_count += num_mm_agents
-    agent_types.extend("POVMarketMakerAgent")
 
     # 4) Momentum Agents
     num_momentum_agents = num_momentum_agents
@@ -209,12 +205,7 @@ def build_config(
         ]
     )
     agent_count += num_momentum_agents
-    agent_types.extend("MomentumAgent")
 
-    # extract kernel seed here to reproduce the state of random generator in old version
-    random_state_kernel = np.random.RandomState(
-        seed=np.random.randint(low=0, high=2**32, dtype="uint64")
-    )
     # LATENCY
 
     latency_model = generate_latency_model(agent_count)
@@ -236,6 +227,5 @@ def build_config(
         "agent_latency_model": latency_model,
         "default_computation_delay": default_computation_delay,
         "custom_properties": {"oracle": None},
-        "random_state_kernel": random_state_kernel,
         "stdout_log_level": stdout_log_level,
     }

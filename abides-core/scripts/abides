@@ -1,5 +1,6 @@
 #! /bin/python3
 
+from abides-core.abides_core.abides import extract_l1_snapshots
 import datetime as dt
 import importlib
 import inspect
@@ -67,19 +68,7 @@ def export_l1_snapshots(end_state: Dict[str, any], output_path: str) -> None:
     """Export L1 order book snapshots to parquet file."""
     logger.info(f"Exporting L1 snapshots to {output_path}")
 
-    exchange_agent = end_state["agents"][0]
-    symbol = list(exchange_agent.order_books.keys())[0]
-    order_book = exchange_agent.order_books[symbol]
-
-    L1 = order_book.get_L1_snapshots()
-
-    df = pd.DataFrame({
-        'time': pd.to_datetime(L1['best_bids'][:, 0], unit='ns'),
-        'bid_price': L1['best_bids'][:, 1],
-        'bid_volume': L1['best_bids'][:, 2],
-        'ask_price': L1['best_asks'][:, 1],
-        'ask_volume': L1['best_asks'][:, 2],
-    })
+    df = extract_l1_snapshots(end_state)
 
     df.to_parquet(output_path, index=False)
     logger.info(f"L1 snapshots exported successfully")
