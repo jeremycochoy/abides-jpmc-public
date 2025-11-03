@@ -11,7 +11,7 @@ from abides_markets.agents import (
     MomentumAgent,
 #    POVExecutionAgent,
 )
-from abides_markets.agents.zero_intelligence import ZeroIntelligence as ZeroIntelligenceAgent
+from abides_markets.agents.zero_intelligence import ZeroIntelligence as ZeroIntelligenceAgent, LogNormalPriceDistribution
 POVExecutionAgent = None
 from abides_markets.orders import Side, LimitOrder
 from abides_markets.utils import generate_latency_model
@@ -28,11 +28,11 @@ INITIAL_PRICE = REAL_STOCK_PRICE * TICK_SIZE // LOT_SIZE
 INITIAL_VOLUME = LOT_SIZE  # 1 real stock total (0.5 per side)
 
 # Zero Intelligence agent parameters
-NUM_NOISE_AGENTS = 25  # Number of Zero Intelligence (noise) agents
+NUM_NOISE_AGENTS = 15  # Number of Zero Intelligence (noise) agents
 ZI_PRICE_STD = 0.005  # 0.5% standard deviation relative to mid price
 ZI_ORDER_SIZE_MIN = int(0.1 * LOT_SIZE)  # 0.1 real stocks
 ZI_ORDER_SIZE_MAX = int(0.5 * LOT_SIZE)  # 0.5 real stocks
-ZI_WAKE_UP_INTERVAL = str_to_ns("15s")  # Wake up every 15 seconds
+ZI_WAKE_UP_INTERVAL = str_to_ns("30s")  # Wake up every 15 seconds
 
 def populate_initial_order_book(order_book: OrderBook, mkt_open: int) -> None:
     """Populate order book with initial orders."""
@@ -130,7 +130,7 @@ def build_config(
                 wakeup_time=mkt_open + np.random.randint(0, ZI_WAKE_UP_INTERVAL + 1),
                 wake_up_interval=ZI_WAKE_UP_INTERVAL,
                 log_orders=log_orders,
-                price_std=ZI_PRICE_STD,
+                price_model=LogNormalPriceDistribution(ZI_PRICE_STD),
                 order_size_model=UniformOrderSizeGenerator(ZI_ORDER_SIZE_MIN, ZI_ORDER_SIZE_MAX, np.random.RandomState(seed)),
             )
             for j in range(agent_count, agent_count + num_zi)
