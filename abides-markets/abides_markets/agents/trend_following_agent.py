@@ -25,14 +25,18 @@ class TrendOrderSizeDistribution(ABC):
 
 class ProportionalOrderSize(TrendOrderSizeDistribution):
 
-    def __init__(self, factor: float = 1.0):
+    def __init__(self, factor: float = 1.0, boost: float = 0.0):
         self.factor = factor
+        self.boost = boost
 
     def sample(
         self, short_ma: float, long_ma: float, random_state: np.random.RandomState
     ) -> int:
-        ma_difference = abs(short_ma - long_ma)
-        order_size = int(self.factor * ma_difference)
+        if short_ma == 0 or long_ma == 0:
+            return int(max(self.boost, 1))
+
+        log_difference = abs(np.log(short_ma) - np.log(long_ma))
+        order_size = int(self.factor * log_difference + self.boost)
         return max(order_size, 1)
 
 
@@ -52,9 +56,9 @@ class PoissonArrivalProcess(TradeArrivalProcess):
         return int(random_state.exponential(scale=self.mean_interval))
 
 
-class TrendFollowingAgent(TradingAgent):
+class TrendAgent(TradingAgent, ABC):
     """
-    Trend Following Agent that places orders based on the trend of the mid price.
+    Abstract base class for trend-based trading agents.
 
     Args:
         price_offset: is the percentage offset from the mid price to place the order.
@@ -67,6 +71,10 @@ class TrendFollowingAgent(TradingAgent):
     Overridable methods for custom moving average implementations:
         update_price_history(mid_price): Update internal state with new price data.
         compute_moving_average(window): Compute MA for given window size.
+
+    Abstract methods for strategy implementation:
+        should_trade(ma_difference): Decide whether to trade based on MA difference.
+        determine_trade_side(ma_difference): Decide which side to trade based on MA difference.
     """
 
     def __init__(
@@ -162,43 +170,49 @@ class TrendFollowingAgent(TradingAgent):
         short_ma = self.compute_moving_average(self.short_window)
         long_ma = self.compute_moving_average(self.long_window)
 
-        if long_ma == 0:
+        if long_ma == 0 or short_ma == 0:
             return
 
-        ma_difference = (short_ma - long_ma) / long_ma
+        ma_difference = np.log(short_ma) - np.log(long_ma)
 
-        if abs(ma_difference) < self.threshold:
+        if not self.should_trade(ma_difference):
+            return
+
+        trade_side = self.determine_trade_side(ma_difference)
+        if trade_side is None:
             return
 
         order_size = self.get_order_size(short_ma, long_ma)
         if order_size <= 0:
             return
 
-        if ma_difference > self.threshold:
+        if trade_side == Side.BID:
             limit_price = int(mid_price * (1 + self.price_offset))
-            # logger.info(f"Placing BUY order of size {order_size} @ price {limit_price}")
-            self.place_limit_order(
-                self.symbol, quantity=order_size, side=Side.BID, limit_price=limit_price
-            )
-        elif ma_difference < -self.threshold:
+        else:
             limit_price = int(mid_price * (1 - self.price_offset))
-            # logger.info(f"Placing SELL order of size {order_size} @ price {limit_price}")
-            self.place_limit_order(
-                self.symbol, quantity=order_size, side=Side.ASK, limit_price=limit_price
-            )
+
+        self.place_limit_order(
+            self.symbol, quantity=order_size, side=trade_side, limit_price=limit_price
+        )
+
+    @abstractmethod
+    def should_trade(self, ma_difference: float) -> bool:
+        pass
+
+    @abstractmethod
+    def determine_trade_side(self, ma_difference: float) -> Optional[Side]:
+        pass
 
     def close_position(self, mid_price: float, position: int) -> None:
         quantity = abs(position)
 
         if position > 0:
             limit_price = int(mid_price * (1 - self.price_offset))
-            # logger.info(f"Taking profit: SELL {quantity} @ price {limit_price}")
             self.place_limit_order(
                 self.symbol, quantity=quantity, side=Side.ASK, limit_price=limit_price
             )
         elif position < 0:
             limit_price = int(mid_price * (1 + self.price_offset))
-            # logger.info(f"Taking profit: BUY {quantity} @ price {limit_price}")
             self.place_limit_order(
                 self.symbol, quantity=quantity, side=Side.BID, limit_price=limit_price
             )
@@ -219,6 +233,41 @@ class TrendFollowingAgent(TradingAgent):
 
     def get_wake_frequency(self) -> NanosecondTime:
         return str_to_ns("1s")
+
+
+class TrendFollowingAgent(TrendAgent):
+    """
+    Trend Following Agent: trades when trend is strong (abs(delta) > threshold).
+    Buys when short MA rises above long MA, sells when it falls below.
+    """
+
+    def should_trade(self, ma_difference: float) -> bool:
+        return abs(ma_difference) > self.threshold
+
+    def determine_trade_side(self, ma_difference: float) -> Optional[Side]:
+        if ma_difference > 0:
+            return Side.BID
+        elif ma_difference < 0:
+            return Side.ASK
+        return None
+
+
+class TrendContrarianAgent(TrendAgent):
+    """
+    Trend Contrarian Agent (Mean Reversion): trades when price is near fundamental (abs(delta) < threshold).
+    Buys when price falls below long MA, sells when it rises above.
+    Assumes long MA represents fundamental value and price will revert to it.
+    """
+
+    def should_trade(self, ma_difference: float) -> bool:
+        return abs(ma_difference) < self.threshold
+
+    def determine_trade_side(self, ma_difference: float) -> Optional[Side]:
+        if ma_difference > 0:
+            return Side.ASK
+        elif ma_difference < 0:
+            return Side.BID
+        return None
 
 
 class ExponentialTrendFollowingAgent(TrendFollowingAgent):

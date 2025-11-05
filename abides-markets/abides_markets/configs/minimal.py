@@ -38,7 +38,7 @@ TF_SHORT_WINDOW = 20
 TF_LONG_WINDOW = 50
 TF_THRESHOLD = 0.01
 TF_PRICE_OFFSET = 0.05
-TF_ORDER_SIZE_MODEL = ProportionalOrderSize(factor=0.0003 * LOT_SIZE)
+TF_ORDER_SIZE_MODEL = ProportionalOrderSize(factor=0.0003 * LOT_SIZE, boost= 0.0001 * LOT_SIZE)
 
 def populate_initial_order_book(order_book: OrderBook, mkt_open: int) -> None:
     """Populate order book with initial orders."""
