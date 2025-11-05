@@ -8,11 +8,9 @@ from abides_markets.generators import UniformOrderSizeGenerator
 from abides_markets.agents import (
     ExchangeAgent,
     AdaptiveMarketMakerAgent,
-    MomentumAgent,
-#    POVExecutionAgent,
 )
 from abides_markets.agents.zero_intelligence import ZeroIntelligence as ZeroIntelligenceAgent, LogNormalPriceDistribution
-POVExecutionAgent = None
+from abides_markets.agents.trend_following_agent import TrendFollowingAgent, ProportionalOrderSize, PoissonArrivalProcess
 from abides_markets.orders import Side, LimitOrder
 from abides_markets.utils import generate_latency_model
 from abides_markets.order_book import OrderBook
@@ -28,11 +26,19 @@ INITIAL_PRICE = REAL_STOCK_PRICE * TICK_SIZE // LOT_SIZE
 INITIAL_VOLUME = LOT_SIZE  # 1 real stock total (0.5 per side)
 
 # Zero Intelligence agent parameters
-NUM_NOISE_AGENTS = 15  # Number of Zero Intelligence (noise) agents
+NUM_ZI_AGENTS = 15  # Number of Zero Intelligence (noise) agents
 ZI_PRICE_STD = 0.005  # 0.5% standard deviation relative to mid price
 ZI_ORDER_SIZE_MIN = int(0.1 * LOT_SIZE)  # 0.1 real stocks
 ZI_ORDER_SIZE_MAX = int(0.5 * LOT_SIZE)  # 0.5 real stocks
 ZI_WAKE_UP_INTERVAL = str_to_ns("30s")  # Wake up every 15 seconds
+
+# Trend Following agent parameters
+NUM_TF_AGENTS = 1
+TF_SHORT_WINDOW = 20
+TF_LONG_WINDOW = 50
+TF_THRESHOLD = 0.01
+TF_PRICE_OFFSET = 0.05
+TF_ORDER_SIZE_MODEL = ProportionalOrderSize(factor=0.0003 * LOT_SIZE)
 
 def populate_initial_order_book(order_book: OrderBook, mkt_open: int) -> None:
     """Populate order book with initial orders."""
@@ -61,8 +67,8 @@ def build_config(
     seed=int(time.time_ns()) % (2 ** 32 - 1),
     stdout_log_level="INFO",
     ##
-    num_momentum_agents=0,
-    num_noise_agents=NUM_NOISE_AGENTS,
+    num_trend_following_agents=NUM_TF_AGENTS,
+    num_noise_agents=NUM_ZI_AGENTS,
     ## market maker
     num_market_makers=0,
     mm_pov=0.025,
@@ -182,25 +188,31 @@ def build_config(
     )
     agent_count += num_mm_agents
 
-    # 4) Momentum Agents
-    num_momentum_agents = num_momentum_agents
+    # 4) Trend Following Agents
+    num_tf_agents = num_trend_following_agents
 
     agents.extend(
         [
-            MomentumAgent(
+            TrendFollowingAgent(
                 id=j,
-                name="MOMENTUM_AGENT_{}".format(j),
+                name="TREND_FOLLOWING_AGENT_{}".format(j),
                 symbol=symbol,
                 starting_cash=starting_cash,
-                min_size=1,
-                max_size=10,
-                wake_up_freq=str_to_ns("20s"),
+                random_state=np.random.RandomState(seed + j),
+                sampling_freq=str_to_ns("60s"),
+                trade_arrival=PoissonArrivalProcess(str_to_ns("10min")),
+                first_trade_time=mkt_open + np.random.randint(0, str_to_ns("10min")),
+                short_window=TF_SHORT_WINDOW,
+                long_window=TF_LONG_WINDOW,
+                threshold=TF_THRESHOLD,
+                order_size_model=TF_ORDER_SIZE_MODEL,
+                price_offset=TF_PRICE_OFFSET,
                 log_orders=log_orders,
             )
-            for j in range(agent_count, agent_count + num_momentum_agents)
+            for j in range(agent_count, agent_count + num_tf_agents)
         ]
     )
-    agent_count += num_momentum_agents
+    agent_count += num_tf_agents
 
     # LATENCY
 
