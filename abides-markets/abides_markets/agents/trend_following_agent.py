@@ -188,8 +188,10 @@ class TrendAgent(TradingAgent, ABC):
 
         if trade_side == Side.BID:
             limit_price = int(mid_price * (1 + self.price_offset))
+            logger.info(f"Bid with price {limit_price} and quantity {order_size}")
         else:
             limit_price = int(mid_price * (1 - self.price_offset))
+            logger.info(f"Ask with price {limit_price} and quantity {order_size}")
 
         self.place_limit_order(
             self.symbol, quantity=order_size, side=trade_side, limit_price=limit_price

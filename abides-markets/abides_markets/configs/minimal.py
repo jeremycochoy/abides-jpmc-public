@@ -10,7 +10,7 @@ from abides_markets.agents import (
     AdaptiveMarketMakerAgent,
 )
 from abides_markets.agents.zero_intelligence import ZeroIntelligence as ZeroIntelligenceAgent, LogNormalPriceDistribution
-from abides_markets.agents.trend_following_agent import TrendFollowingAgent, ProportionalOrderSize, PoissonArrivalProcess
+from abides_markets.agents.trend_following_agent import TrendContrarianAgent, TrendFollowingAgent, ProportionalOrderSize, PoissonArrivalProcess
 from abides_markets.orders import Side, LimitOrder
 from abides_markets.utils import generate_latency_model
 from abides_markets.order_book import OrderBook
@@ -26,19 +26,32 @@ INITIAL_PRICE = REAL_STOCK_PRICE * TICK_SIZE // LOT_SIZE
 INITIAL_VOLUME = LOT_SIZE  # 1 real stock total (0.5 per side)
 
 # Zero Intelligence agent parameters
-NUM_ZI_AGENTS = 15  # Number of Zero Intelligence (noise) agents
-ZI_PRICE_STD = 0.005  # 0.5% standard deviation relative to mid price
-ZI_ORDER_SIZE_MIN = int(0.1 * LOT_SIZE)  # 0.1 real stocks
-ZI_ORDER_SIZE_MAX = int(0.5 * LOT_SIZE)  # 0.5 real stocks
+ZI_NB_AGENTS = 15  # Number of Zero Intelligence (noise) agents
+ZI_PRICE_STD = 0.1 / 100.  # 0.1% standard deviation relative to mid price
+ZI_ORDER_SIZE_MIN = int(1.0 * LOT_SIZE)  # 1.0 real stocks
+ZI_ORDER_SIZE_MAX = int(5.0 * LOT_SIZE)  # 5.0 real stocks
 ZI_WAKE_UP_INTERVAL = str_to_ns("30s")  # Wake up every 15 seconds
 
 # Trend Following agent parameters
-NUM_TF_AGENTS = 1
-TF_SHORT_WINDOW = 20
-TF_LONG_WINDOW = 50
-TF_THRESHOLD = 0.01
-TF_PRICE_OFFSET = 0.05
-TF_ORDER_SIZE_MODEL = ProportionalOrderSize(factor=0.0003 * LOT_SIZE, boost= 0.0001 * LOT_SIZE)
+TF_NB_AGENTS = 1
+TF_SHORT_WINDOW = 12
+TF_LONG_WINDOW = 40
+TF_THRESHOLD = 0.05 / 100.
+TF_PRICE_OFFSET = 2.0 / 100 # Amplitude of a shock when the liquidity is low
+TF_ORDER_SIZE_MODEL = ProportionalOrderSize(factor=500 * LOT_SIZE, boost=0.01 * LOT_SIZE)
+TF_TRADE_ARRIVAL_INTERVAL = str_to_ns("5min")
+TF_SAMPLING_FREQ = str_to_ns("60s")
+
+# Mean reverting agent parameters
+TC_NB_AGENTS = 1
+TC_SHORT_WINDOW = 3
+TC_LONG_WINDOW = 60
+TC_THRESHOLD = 0.08 / 100
+TC_PRICE_OFFSET = 2.5 / 100 # Amplitude of a shock when the liquidity is low
+# Boost control the shocks
+TC_ORDER_SIZE_MODEL = ProportionalOrderSize(factor=1000 * LOT_SIZE, boost= 0.01 * LOT_SIZE)
+TC_TRADE_ARRIVAL_INTERVAL = str_to_ns("5min")
+TC_SAMPLING_FREQ = str_to_ns("60s")
 
 def populate_initial_order_book(order_book: OrderBook, mkt_open: int) -> None:
     """Populate order book with initial orders."""
@@ -50,11 +63,7 @@ def populate_initial_order_book(order_book: OrderBook, mkt_open: int) -> None:
     for order in initial_orders:
         order_book.enter_order(order, quiet=True)
 
-
-########################################################################################################################
-############################################### GENERAL CONFIG #########################################################
-
-
+# General configuration
 def build_config(
     ticker="ABM",
     historical_date="20250101",
@@ -67,8 +76,10 @@ def build_config(
     seed=int(time.time_ns()) % (2 ** 32 - 1),
     stdout_log_level="INFO",
     ##
-    num_trend_following_agents=NUM_TF_AGENTS,
-    num_noise_agents=NUM_ZI_AGENTS,
+    num_trend_following_agents=TF_NB_AGENTS,
+    num_noise_agents=ZI_NB_AGENTS,
+    ##
+    num_trend_contrarian_agents=TC_NB_AGENTS,
     ## market maker
     num_market_makers=0,
     mm_pov=0.025,
@@ -199,14 +210,40 @@ def build_config(
                 symbol=symbol,
                 starting_cash=starting_cash,
                 random_state=np.random.RandomState(seed + j),
-                sampling_freq=str_to_ns("60s"),
-                trade_arrival=PoissonArrivalProcess(str_to_ns("10min")),
-                first_trade_time=mkt_open + np.random.randint(0, str_to_ns("10min")),
+                sampling_freq=TF_SAMPLING_FREQ,
+                trade_arrival=PoissonArrivalProcess(TF_TRADE_ARRIVAL_INTERVAL),
+                first_trade_time=mkt_open + np.random.randint(0, TF_TRADE_ARRIVAL_INTERVAL),
                 short_window=TF_SHORT_WINDOW,
                 long_window=TF_LONG_WINDOW,
                 threshold=TF_THRESHOLD,
                 order_size_model=TF_ORDER_SIZE_MODEL,
                 price_offset=TF_PRICE_OFFSET,
+                log_orders=log_orders,
+            )
+            for j in range(agent_count, agent_count + num_tf_agents)
+        ]
+    )
+    agent_count += num_tf_agents
+
+    # 5) Mean reversion Agents
+    num_tf_agents = num_trend_contrarian_agents
+
+    agents.extend(
+        [
+            TrendContrarianAgent(
+                id=j,
+                name="TREND_CONTRARIAN_AGENT_{}".format(j),
+                symbol=symbol,
+                starting_cash=starting_cash,
+                random_state=np.random.RandomState(seed + j),
+                sampling_freq=TC_SAMPLING_FREQ,
+                trade_arrival=PoissonArrivalProcess(TC_TRADE_ARRIVAL_INTERVAL),
+                first_trade_time=mkt_open + np.random.randint(0, TC_TRADE_ARRIVAL_INTERVAL),
+                short_window=TC_SHORT_WINDOW,
+                long_window=TC_LONG_WINDOW,
+                threshold=TC_THRESHOLD,
+                order_size_model=TC_ORDER_SIZE_MODEL,
+                price_offset=TC_PRICE_OFFSET,
                 log_orders=log_orders,
             )
             for j in range(agent_count, agent_count + num_tf_agents)
