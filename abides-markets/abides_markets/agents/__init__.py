@@ -1,6 +1,11 @@
 from .examples.momentum_agent import MomentumAgent
 
 from .market_makers.adaptive_market_maker_agent import AdaptiveMarketMakerAgent
+from .market_makers.liquidity_market_maker_agent import (
+    LiquidityMarketMakerAgent,
+    LiquidityModel,
+    SymmetricHumpLiquidityModel,
+)
 
 from .exchange_agent import ExchangeAgent
 from .financial_agent import FinancialAgent

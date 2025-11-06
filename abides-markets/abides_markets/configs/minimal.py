@@ -7,7 +7,8 @@ from abides_core.utils import str_to_ns, datetime_str_to_ns
 from abides_markets.generators import UniformOrderSizeGenerator
 from abides_markets.agents import (
     ExchangeAgent,
-    AdaptiveMarketMakerAgent,
+    LiquidityMarketMakerAgent,
+    SymmetricHumpLiquidityModel,
 )
 from abides_markets.agents.zero_intelligence import ZeroIntelligence as ZeroIntelligenceAgent, LogNormalPriceDistribution
 from abides_markets.agents.trend_following_agent import TrendContrarianAgent, TrendFollowingAgent, ProportionalOrderSize, PoissonArrivalProcess
@@ -53,6 +54,17 @@ TC_ORDER_SIZE_MODEL = ProportionalOrderSize(factor=1000 * LOT_SIZE, boost= 0.01 
 TC_TRADE_ARRIVAL_INTERVAL = str_to_ns("5min")
 TC_SAMPLING_FREQ = str_to_ns("60s")
 
+# Liquidity Market Maker parameters
+LMM_NB_AGENTS = 0
+LMM_TOTAL_LIQUIDITY = 10 * LOT_SIZE
+LMM_STEP_SIZE_RATIO = 100.0 / 100_000
+LMM_MAX_LEVELS = 100
+LMM_IMBALANCE_BETA = 0.0
+LMM_SAMPLING_FREQ = str_to_ns("10s")
+LMM_TRADE_ARRIVAL_INTERVAL = str_to_ns("10s")
+LMM_PEAK_DISTANCE_RATIO = 5_000.0 / 100_000
+LMM_SHAPE_EXPONENT = 1.2
+
 def populate_initial_order_book(order_book: OrderBook, mkt_open: int) -> None:
     """Populate order book with initial orders."""
     vol = INITIAL_VOLUME // 2
@@ -80,17 +92,16 @@ def build_config(
     num_noise_agents=ZI_NB_AGENTS,
     ##
     num_trend_contrarian_agents=TC_NB_AGENTS,
-    ## market maker
-    num_market_makers=0,
-    mm_pov=0.025,
-    mm_window_size="adaptive",
-    mm_min_order_size=1,
-    mm_num_ticks=10,
-    mm_wake_up_freq=str_to_ns("10s"),
-    mm_skew_beta=0,
-    mm_level_spacing=5,
-    mm_spread_alpha=0.75,
-    mm_backstop_quantity=50_000,
+    ## liquidity market maker
+    num_market_makers=LMM_NB_AGENTS,
+    mm_total_liquidity=LMM_TOTAL_LIQUIDITY,
+    mm_step_size_ratio=LMM_STEP_SIZE_RATIO,
+    mm_max_levels=LMM_MAX_LEVELS,
+    mm_imbalance_beta=LMM_IMBALANCE_BETA,
+    mm_sampling_freq=LMM_SAMPLING_FREQ,
+    mm_trade_arrival_interval=LMM_TRADE_ARRIVAL_INTERVAL,
+    mm_peak_distance_ratio=LMM_PEAK_DISTANCE_RATIO,
+    mm_shape_exponent=LMM_SHAPE_EXPONENT,
 ):
     symbol = ticker
 
@@ -155,46 +166,32 @@ def build_config(
     )
     agent_count += num_zi
 
-    # 3) Market Maker Agents
-
-    """
-    window_size ==  Spread of market maker (in ticks) around the mid price
-    pov == Percentage of transacted volume seen in previous `mm_wake_up_freq` that
-           the market maker places at each level
-    num_ticks == Number of levels to place orders in around the spread
-    wake_up_freq == How often the market maker wakes up
-    
-    """
-
-    # each elem of mm_params is tuple (window_size, pov, num_ticks, wake_up_freq, min_order_size)
-    mm_params = num_market_makers * [
-        (mm_window_size, mm_pov, mm_num_ticks, mm_wake_up_freq, mm_min_order_size)
-    ]
-
-    num_mm_agents = len(mm_params)
-    mm_cancel_limit_delay = 50  # 50 nanoseconds
+    # 3) Liquidity Market Maker Agents
+    num_mm_agents = num_market_makers
 
     agents.extend(
         [
-            AdaptiveMarketMakerAgent(
+            LiquidityMarketMakerAgent(
                 id=j,
-                name="ADAPTIVE_POV_MARKET_MAKER_AGENT_{}".format(j),
-                type="AdaptivePOVMarketMakerAgent",
+                name="LIQUIDITY_MARKET_MAKER_AGENT_{}".format(j),
+                type="LiquidityMarketMakerAgent",
                 symbol=symbol,
                 starting_cash=starting_cash,
-                pov=mm_params[idx][1],
-                min_order_size=mm_params[idx][4],
-                window_size=mm_params[idx][0],
-                num_ticks=mm_params[idx][2],
-                wake_up_freq=mm_params[idx][3],
-                cancel_limit_delay=mm_cancel_limit_delay,
-                skew_beta=mm_skew_beta,
-                level_spacing=mm_level_spacing,
-                spread_alpha=mm_spread_alpha,
-                backstop_quantity=mm_backstop_quantity,
+                random_state=np.random.RandomState(seed + j),
+                liquidity_model=SymmetricHumpLiquidityModel(
+                    peak_distance_ratio=mm_peak_distance_ratio,
+                    shape_exponent=mm_shape_exponent,
+                ),
+                total_liquidity=mm_total_liquidity,
+                step_size_ratio=mm_step_size_ratio,
+                max_levels=mm_max_levels,
+                imbalance_beta=mm_imbalance_beta,
+                sampling_freq=mm_sampling_freq,
+                trade_arrival=mm_trade_arrival_interval,
+                first_wake_time=mkt_open + np.random.randint(0, mm_trade_arrival_interval),
                 log_orders=log_orders,
             )
-            for idx, j in enumerate(range(agent_count, agent_count + num_mm_agents))
+            for j in range(agent_count, agent_count + num_mm_agents)
         ]
     )
     agent_count += num_mm_agents
