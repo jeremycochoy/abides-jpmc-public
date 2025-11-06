@@ -15,6 +15,14 @@ from ..trend_following_agent import TradeArrivalProcess
 logger = logging.getLogger(__name__)
 
 
+def round_to_tick(price: float, tick: float, side: Side) -> int:
+    """Round price to tick size, ensuring bids never cross up and asks never cross down."""
+    if side == Side.BID:
+        return int(tick * np.floor(price / tick))
+    else:  # Side.ASK
+        return int(tick * np.ceil(price / tick))
+
+
 class LiquidityModel(ABC):
     """Abstract base class for liquidity distribution models."""
 
@@ -170,7 +178,7 @@ class LiquidityMarketMakerAgent(TradingAgent):
             asks = self.known_asks[self.symbol]
 
             if bids and asks:
-                mid_price = (bids[0][0] + asks[0][0]) / 2.0
+                mid_price = np.sqrt(bids[0][0] * asks[0][0])
 
                 if self.time_to_update(current_time):
                     self.cancel_all_orders()
@@ -198,7 +206,7 @@ class LiquidityMarketMakerAgent(TradingAgent):
         return float(np.clip(imbalance, -1.0, 1.0))
 
     def compute_liquidity_distribution(self, mid_price: float, imbalance: float):
-        log_step = np.log(1.0 + self.step_size_ratio)
+        log_step = np.log1p(self.step_size_ratio)
 
         bid_log_prices = np.arange(-log_step, -log_step * (self.max_levels + 1), -log_step)
         ask_log_prices = np.arange(log_step, log_step * (self.max_levels + 1), log_step)
@@ -216,8 +224,14 @@ class LiquidityMarketMakerAgent(TradingAgent):
         bid_liquidity = liquidity[: len(bid_prices)]
         ask_liquidity = liquidity[len(bid_prices) :]
 
-        return bid_prices, bid_liquidity, ask_prices, ask_liquidity
+        # Optional: per-side normalization so rounding noise doesn’t skew totals
+        mass_bid = np.sum(bid_liquidity) * log_step
+        mass_ask = np.sum(ask_liquidity) * log_step
+        if mass_bid > 0: bid_liquidity *= (0.5 * self.total_liquidity) / mass_bid
+        if mass_ask > 0: ask_liquidity *= (0.5 * self.total_liquidity) / mass_ask
 
+        return bid_prices, bid_liquidity, ask_prices, ask_liquidity
+    
     def place_liquidity_orders(self, mid_price: float, imbalance: float) -> None:
         bid_prices, bid_qtys, ask_prices, ask_qtys = self.compute_liquidity_distribution(
             mid_price, imbalance
@@ -227,16 +241,21 @@ class LiquidityMarketMakerAgent(TradingAgent):
         for price, qty in zip(bid_prices, bid_qtys):
             quantity = int(np.round(qty))
             if quantity > 0:
+                px = round_to_tick(price, 1, Side.BID)
                 orders.append(
-                    self.create_limit_order(self.symbol, quantity, Side.BID, int(price))
+                    self.create_limit_order(self.symbol, quantity, Side.BID, px)
                 )
 
         for price, qty in zip(ask_prices, ask_qtys):
             quantity = int(np.round(qty))
             if quantity > 0:
+                px = round_to_tick(price, 1, Side.ASK)
                 orders.append(
-                    self.create_limit_order(self.symbol, quantity, Side.ASK, int(price))
+                    self.create_limit_order(self.symbol, quantity, Side.ASK, px)
                 )
 
         if orders:
             self.place_multiple_orders(orders)
+
+    def get_wake_frequency(self) -> NanosecondTime:
+        return self.sampling_freq
