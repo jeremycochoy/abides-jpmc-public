@@ -178,12 +178,13 @@ class LiquidityMarketMakerAgent(TradingAgent):
             asks = self.known_asks[self.symbol]
 
             if bids and asks:
-                mid_price = np.sqrt(bids[0][0] * asks[0][0])
+                mid_price = np.sqrt(float(bids[0][0] * asks[0][0]))
 
                 if self.time_to_update(current_time):
                     self.cancel_all_orders()
                     imbalance = self.compute_imbalance()
-                    self.place_liquidity_orders(mid_price, imbalance)
+                    if mid_price > 0:
+                        self.place_liquidity_orders(mid_price, imbalance)
                     self.schedule_next_wake(current_time)
 
     def time_to_update(self, current_time: NanosecondTime) -> bool:
