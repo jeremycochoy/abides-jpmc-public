@@ -1,3 +1,4 @@
+# Package age rule (README.md): install with pip 26.1 or later and --uploaded-prior-to=P7D.
 p_tqdm==1.3.3
 pre-commit==2.13
 pytest==6.2.4

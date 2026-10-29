@@ -45,8 +45,8 @@ Clone the repo and connect into its top level directory.
 To initialize and run the `gym` example:
 
 ```
-pip install -r requirements.txt
-pip install -e gym-example
+pip install --uploaded-prior-to=P7D -r requirements.txt
+pip install --uploaded-prior-to=P7D -e gym-example
 
 python sample.py
 ```
