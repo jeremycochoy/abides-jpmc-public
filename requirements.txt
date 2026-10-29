@@ -1,3 +1,4 @@
+# Package age rule (README.md): install with pip 26.1 or later and --uploaded-prior-to=P7D.
 coloredlogs==15.0.1
 gym==0.18.0
 numpy==1.22.0

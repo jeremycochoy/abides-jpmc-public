@@ -76,7 +76,7 @@ Currently the following hooks are enabled:
 
 To install pre-commit run:
 ```
-$ python -m pip install -r requirements-dev.txt
+$ python -m pip install --uploaded-prior-to=P7D -r requirements-dev.txt
 ```
 
 To enable pre-commit hooks run:

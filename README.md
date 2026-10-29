@@ -11,6 +11,7 @@
   <li>
     <a href="#getting-started">Getting Started</a>
     <ul>
+      <li><a href="#package-age-rule">Package Age Rule</a></li>
       <li><a href="#installation">Installation</a></li>
     </ul>
   </li>
@@ -75,6 +76,12 @@ or by using the following BibTeX:
 
 <!-- GETTING STARTED -->
 ## Getting Started
+### Package Age Rule
+
+Do not install a PyPI, npm, Cargo or Go package version that is less than 7 days old. A new release can contain malware.
+Use this limit for each installation: `--uploaded-prior-to=P7D` with pip 26.1 or later, `exclude-newer = "7 days"` with uv, and `min-release-age=7` with npm 11.10 or later.
+Stable Cargo and Go have no such setting. For each new or updated crate or Go module, the author checks its release date, and the reviewer refuses a version that is less than 7 days old.
+
 ### Installation
 
 1. Download the ABIDES source code, either directly from GitHub or with git:
